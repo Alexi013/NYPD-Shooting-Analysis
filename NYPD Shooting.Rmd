@@ -1,0 +1,233 @@
+---
+title: "NYPD Shooting Report"
+date: "2025-04-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lubridate)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Import Libraries
+
+```{r}
+library(tidyverse)
+library(lubridate)
+```
+
+# 2. Read Data In
+
+```{r}
+df <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+head(df)
+```
+
+The data was imported directly from the NYC Open Data portal.  
+This dataset contains detailed information regarding reported shooting incidents handled by the NYPD across all five boroughs of New York City, including location, demographics of involved parties, and the outcome of the incidents.  
+(Source: [NYPD Shooting Incident Data (Historic)](https://data.cityofnewyork.us/Public-Safety/NYPD-Shooting-Incident-Data-Historic-/833y-fsy8/about_data))
+
+---
+
+# 3. Tidy Data
+Looking at the columns from the previous head(df), we are able to determine columns we will not be
+utilizing for this assignment. These columns are PRECINCT , JURISDICTION_CODE, LOCATION_DESC , X_COORD_CD , Y_COORD_CD , LOC_OF_OCCUR_DESC , LOCATION_CLASSFCTN_DESC , Latitude, Longitude and Lon_Lat.
+```{r}
+df_2 <- df %>%
+  select(
+    INCIDENT_KEY,
+    OCCUR_DATE,
+    OCCUR_TIME,
+    BORO,
+    STATISTICAL_MURDER_FLAG,
+    PERP_AGE_GROUP,
+    PERP_SEX,
+    PERP_RACE,
+    VIC_AGE_GROUP,
+    VIC_SEX,
+    VIC_RACE
+  )
+
+# Fill NAs
+df_2 <- df_2 %>%
+  replace_na(list(PERP_AGE_GROUP = "Unknown", PERP_SEX = "Unknown", PERP_RACE = "Unknown"))
+
+# Standardize cases
+df_2$PERP_RACE <- str_to_title(df_2$PERP_RACE)
+df_2$VIC_RACE <- str_to_title(df_2$VIC_RACE)
+df_2$PERP_AGE_GROUP <- str_to_title(df_2$PERP_AGE_GROUP)
+df_2$VIC_AGE_GROUP <- str_to_title(df_2$VIC_AGE_GROUP)
+
+# Filter only valid entries
+valid_age_groups <- c("<18", "18-24", "25-44", "45-64", "65+", "Unknown")
+valid_race_groups <- c(
+  "American Indian/Alaskan Native", "Asian / Pacific Islander",
+  "Black", "Black Hispanic", "White", "White Hispanic", "Unknown"
+)
+
+df_2 <- df_2 %>%
+  filter(PERP_AGE_GROUP %in% valid_age_groups,
+         VIC_AGE_GROUP %in% valid_age_groups,
+         PERP_RACE %in% valid_race_groups,
+         VIC_RACE %in% valid_race_groups)
+
+# Factors
+df_2$BORO <- as.factor(df_2$BORO)
+df_2$PERP_AGE_GROUP <- as.factor(df_2$PERP_AGE_GROUP)
+df_2$PERP_SEX <- as.factor(df_2$PERP_SEX)
+df_2$PERP_RACE <- as.factor(df_2$PERP_RACE)
+df_2$VIC_AGE_GROUP <- as.factor(df_2$VIC_AGE_GROUP)
+df_2$VIC_SEX <- as.factor(df_2$VIC_SEX)
+df_2$VIC_RACE <- as.factor(df_2$VIC_RACE)
+
+summary(df_2)
+```
+
+Looking over the returned values, we are able to tell that there is missing data from a handful of columns.
+We can understand a sense of ambiguity in the race, sex and age of the perpetrator that could be present
+in possibly ongoing and active investigations. To address these gaps of information, we will be calling these
+occurrences “Unknown” as to avoid potentially mishandling meaningful data.
+
+---
+
+# 4. Incidents and Murder by Borough
+
+```{r}
+df_2 %>%
+  group_by(BORO) %>%
+  summarize(
+    Incident_Count = n(),
+    Murder_Count = sum(STATISTICAL_MURDER_FLAG)
+  ) %>%
+  pivot_longer(cols = c(Incident_Count, Murder_Count), names_to = "Type", values_to = "Count") %>%
+  ggplot(aes(x = BORO, y = Count, fill = Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Incidents and Murders by Borough", y = "Count", x = "Borough") +
+  scale_fill_manual(values = c("Incident_Count" = "blue", "Murder_Count" = "red")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "top",
+    legend.title = element_blank()
+  )
+```
+
+We are able to see that among the New York boroughs, Brooklyn by far has the most incident count as well  
+as having the highest murder count with Staten Island coming in last with the fewest incident count and murder count.  
+This led to another question of, who are the people making up these incidents and murders?
+
+---
+
+# 5. Heatmaps by Perpetrator and Victim Race
+
+```{r}
+density_data <- df_2 %>%
+  group_by(BORO, PERP_RACE) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+ggplot(density_data, aes(x = BORO, y = PERP_RACE, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Perpetrator Race by Borough", x = "Borough", y = "Perpetrator Race", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1, breaks = waiver()) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+density_data <- df_2 %>%
+  group_by(BORO, VIC_RACE) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+ggplot(density_data, aes(x = BORO, y = VIC_RACE, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Victim Race by Borough", x = "Borough", y = "Victim Race", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1, breaks = waiver()) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The heatmaps show the racial distribution of perpetrators and victims across boroughs.  
+Noticeable densities are concentrated in Black and Hispanic groups, consistent with previous research on demographic representation in crime data.
+
+---
+
+# 6. Heatmaps by Perpetrator and Victim Age
+
+```{r}
+density_data <- df_2 %>%
+  group_by(BORO, PERP_AGE_GROUP) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+ggplot(density_data, aes(x = BORO, y = PERP_AGE_GROUP, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Perpetrator Age by Borough", x = "Borough", y = "Perpetrator Age", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1, breaks = waiver()) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+density_data <- df_2 %>%
+  group_by(BORO, VIC_AGE_GROUP) %>%
+  summarize(density = n()) %>%
+  ungroup()
+
+ggplot(density_data, aes(x = BORO, y = VIC_AGE_GROUP, fill = density)) +
+  geom_tile(width = 0.9, height = 0.9) +
+  labs(title = "Density of Victim Age by Borough", x = "Borough", y = "Victim Age", fill = "Density") +
+  scale_fill_distiller(palette = "Spectral", direction = -1, breaks = waiver()) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+We are able to determine that the highest density of perpetrators is once again seen within the Unknown
+group, with 25-44 and 18-24 following. Similarly to the race map explored above, the Unknown group falls
+in terms of occurrence and 25-44 and 18-24 rise in density of occurrence when investigating victims.
+As mentioned while we were tidying our data, this large disparity of Unknowns among both age groups and
+race could be attributed to unsolved and on going investigations where the perpetrator may still not be
+known. This supports why when exploring the victim data we have a drop in Unknown occurrences, as they
+are probably the ones reporting the crime and are able to provide information about themselves.
+
+---
+
+# 7. Logistic Regression Model
+
+```{r}
+df_2$OCCUR_DAY <- mdy(df_2$OCCUR_DATE)
+df_2$OCCUR_DAY <- wday(df_2$OCCUR_DAY, label = TRUE)
+df_2$OCCUR_HOUR <- hour(hms(as.character(df_2$OCCUR_TIME)))
+
+glm.fit <- glm(
+  STATISTICAL_MURDER_FLAG ~ PERP_RACE + PERP_SEX + PERP_AGE_GROUP + OCCUR_HOUR + OCCUR_DAY + BORO,
+  family = binomial,
+  data = df_2
+)
+
+summary(glm.fit)
+```
+
+The logistic regression model explored how perpetrator demographics, timing, and borough influence the odds of an incident being classified as a murder.  
+Some race and age groups showed statistically significant effects, but overall the model leaves much variability unexplained.  
+This suggests that predicting murder outcomes is highly complex and likely influenced by additional, unmeasured variables.
+
+---
+
+# 8. Identifying Bias
+
+Dealing with data always carries the threat of one’s bias showing through in how data is handled and interpreted.  
+Although I did not have any biases towards specific boroughs, I acknowledge that datasets from police departments must be treated carefully, considering historical over-policing concerns, particularly in Black and Hispanic communities.
+
+In future analysis, layering in demographic data of borough populations could help clarify these relationships.  
+Furthermore, it would be valuable to study how reporting practices or societal factors may influence the observed trends beyond raw numbers.
+
+---
+
+# 9. Resources
+
+- [NYPD Shooting Incident Data (Historic)](https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic)
+- [A Closer Look at Stop-and-Frisk in NYC - NYCLU](https://www.nyclu.org/en/closer-look-stop-and-frisk-nyc)
+
